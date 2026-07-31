@@ -94,6 +94,20 @@ impl GitRepository {
                         }
                     }
                 }
+
+                if auth.auth_type == "ssh" && allowed_types.is_ssh_key() {
+                    if let Some(ref private_key) = auth.ssh_key_path {
+                        let username = username_from_url.unwrap_or("git");
+                        let public_key = format!("{}.pub", private_key);
+                        let public_key_path = std::path::Path::new(&public_key);
+                        return Cred::ssh_key(
+                            username,
+                            public_key_path.exists().then_some(public_key_path),
+                            std::path::Path::new(private_key),
+                            None,
+                        );
+                    }
+                }
             }
 
             // 1. 尝试 SSH agent
@@ -235,6 +249,25 @@ impl GitRepository {
                             Err(e) => {
                                 eprintln!("   ❌ 用户名/密码认证失败：{}", e);
                             }
+                        }
+                    }
+                }
+
+
+                if auth.auth_type == "ssh" && allowed_types.is_ssh_key() {
+                    if let Some(ref private_key) = auth.ssh_key_path {
+                        eprintln!("   正在使用配置的 SSH 密钥...");
+                        let username = username_from_url.unwrap_or("git");
+                        let public_key = format!("{}.pub", private_key);
+                        let public_key_path = std::path::Path::new(&public_key);
+                        match Cred::ssh_key(
+                            username,
+                            public_key_path.exists().then_some(public_key_path),
+                            std::path::Path::new(private_key),
+                            None,
+                        ) {
+                            Ok(cred) => return Ok(cred),
+                            Err(e) => eprintln!("   ❌ 配置的 SSH 密钥无法使用：{}", e),
                         }
                     }
                 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, watch } from 'vue';
 
 import Sidebar from "./components/layout/Sidebar.vue";
 import TopBar from "./components/layout/TopBar.vue";
@@ -46,17 +46,30 @@ function showAddRepoModal() {
   isAddRepoOpen.value = true;
 }
 
-function handleRepoAdded(_path: string) {
-  // Repo was added successfully
+async function handleRepoAdded(path: string) {
   isAddRepoOpen.value = false;
-  // TODO: Refresh repo list or select the new repo
+  const addedRepo = repoStore.repositories.find(repo => repo.path === path);
+  if (addedRepo) {
+    selectRepo(addedRepo);
+    await repoStore.loadRepoData(addedRepo);
+  }
 }
 
 // Handle window focus event
 function handleWindowFocus() {
-  // Refresh all repository data when window gains focus
-  repoStore.refreshAllData();
+  if (settingsStore.settings.sync.refreshOnFocus) {
+    repoStore.refreshAllData();
+  }
 }
+
+watch(
+  () => settingsStore.settings.sync.autoRefreshInterval,
+  () => {
+    if (repoStore.activeRepo && repoStore.autoSyncEnabled) {
+      repoStore.startAutoSync();
+    }
+  }
+);
 
 onMounted(() => {
   // 从设置中恢复 Sidebar 宽度

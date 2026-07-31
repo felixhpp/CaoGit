@@ -2,6 +2,7 @@ import { reactive } from 'vue';
 import type { Repository, FileChange, Commit } from '../types';
 import { GitApi, type SyncStatus } from '../services/gitApi';
 import { cacheService } from '../services/cacheService';
+import { settingsStore } from './settingsStore';
 
 // Load repositories from localStorage
 function loadRepositories(): Repository[] {
@@ -19,15 +20,36 @@ function loadRepositories(): Repository[] {
 // Save repositories to localStorage
 function saveRepositories(repositories: Repository[]) {
     try {
-        localStorage.setItem('repositories', JSON.stringify(repositories));
+        const persistedRepositories = repositories.map(repo => {
+            if (settingsStore.settings.security.rememberCredentials) {
+                return repo;
+            }
+
+            const {
+                token: _token,
+                password: _password,
+                proxy,
+                ...safeRepo
+            } = repo;
+
+            return {
+                ...safeRepo,
+                proxy: proxy ? {
+                    ...proxy,
+                    username: undefined,
+                    password: undefined
+                } : undefined
+            };
+        });
+
+        localStorage.setItem('repositories', JSON.stringify(persistedRepositories));
     } catch (e) {
         console.error('Failed to save repositories to localStorage:', e);
     }
 }
 
-// Auto-sync timer
+// Auto-refresh timer
 let syncTimer: number | null = null;
-const SYNC_INTERVAL = 10000; // 10 seconds
 
 export const repoStore = reactive({
     repositories: loadRepositories(),
@@ -144,18 +166,18 @@ export const repoStore = reactive({
         }
     },
 
-    async refreshCommits(maxCount: number = 100, offset: number = 0) {
+    async refreshCommits(maxCount: number = 100, offset: number = 0, branch?: string) {
         if (!this.activeRepo) return;
 
         // Use cache for commits
-        const cacheKey = `commits:${this.activeRepo.path}:${maxCount}:${offset}`;
+        const cacheKey = `commits:${this.activeRepo.path}:${branch || 'HEAD'}:${maxCount}:${offset}`;
         const cached = cacheService.get<Commit[]>(cacheKey);
         if (cached) {
             this.commits = offset === 0 ? cached : [...this.commits, ...cached];
             return;
         }
 
-        const response = await GitApi.getCommits(this.activeRepo.path, maxCount);
+        const response = await GitApi.getCommits(this.activeRepo.path, maxCount, offset, branch);
         if (response.success && response.data) {
             this.commits = offset === 0 ? response.data : [...this.commits, ...response.data];
             // Increase cache TTL for commits from 30s to 5 minutes (300000ms)
@@ -296,6 +318,7 @@ export const repoStore = reactive({
         // 获取认证配置
         const authConfig = this.activeRepo.authType !== 'none' ? {
             authType: this.activeRepo.authType,
+            token: this.activeRepo.token,
             username: this.activeRepo.username,
             password: this.activeRepo.password,
             sshKeyPath: this.activeRepo.sshKeyPath
@@ -328,6 +351,7 @@ export const repoStore = reactive({
         // 获取认证配置
         const authConfig = this.activeRepo.authType !== 'none' ? {
             authType: this.activeRepo.authType,
+            token: this.activeRepo.token,
             username: this.activeRepo.username,
             password: this.activeRepo.password,
             sshKeyPath: this.activeRepo.sshKeyPath
@@ -402,6 +426,10 @@ export const repoStore = reactive({
         }
     },
 
+    persistRepositories() {
+        saveRepositories(this.repositories);
+    },
+
     // Clear cache for active repo
     clearCache() {
         if (this.activeRepo) {
@@ -452,7 +480,9 @@ export const repoStore = reactive({
         // Clear existing timer
         this.stopAutoSync();
 
-        // Set up new timer
+        const intervalSeconds = Math.max(2, settingsStore.settings.sync.autoRefreshInterval || 10);
+
+        // One refresh scheduler for repository status, branches and sync state.
         syncTimer = window.setInterval(async () => {
             if (this.activeRepo && this.autoSyncEnabled) {
                 try {
@@ -466,7 +496,7 @@ export const repoStore = reactive({
                     console.debug('Auto-sync failed:', error);
                 }
             }
-        }, SYNC_INTERVAL);
+        }, intervalSeconds * 1000);
     },
 
     // Stop auto-sync timer

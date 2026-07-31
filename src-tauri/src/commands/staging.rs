@@ -67,9 +67,14 @@ pub fn commit_changes(repo_path: String, message: String) -> ApiResponse<String>
 
 /// Get commit history
 #[tauri::command]
-pub fn get_commits(repo_path: String, max_count: usize) -> ApiResponse<Vec<CommitInfo>> {
+pub fn get_commits(
+    repo_path: String,
+    max_count: usize,
+    offset: Option<usize>,
+    reference: Option<String>,
+) -> ApiResponse<Vec<CommitInfo>> {
     match GitRepository::open(&repo_path) {
-        Ok(repo) => match repo.get_commits(max_count) {
+        Ok(repo) => match repo.get_commits(max_count, offset.unwrap_or(0), reference.as_deref()) {
             Ok(commits) => ApiResponse::success(commits),
             Err(e) => ApiResponse::error(e.to_string()),
         },

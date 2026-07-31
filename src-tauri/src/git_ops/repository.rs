@@ -2,7 +2,7 @@
 //!
 //! This module provides the main GitRepository struct and basic operations.
 
-use git2::{Repository, Status, StatusOptions};
+use git2::{FetchOptions, ProxyOptions, Repository, Status, StatusOptions};
 use std::path::Path;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -30,8 +30,17 @@ impl GitRepository {
     }
 
     /// Clone a repository from a URL
-    pub fn clone(url: &str, path: &str) -> Result<Self> {
-        let repo = Repository::clone(url, path)
+    pub fn clone(url: &str, path: &str, proxy_url: Option<&str>) -> Result<Self> {
+        let mut fetch_options = FetchOptions::new();
+        if let Some(proxy_url) = proxy_url {
+            let mut proxy_options = ProxyOptions::new();
+            proxy_options.url(proxy_url);
+            fetch_options.proxy_options(proxy_options);
+        }
+
+        let mut builder = git2::build::RepoBuilder::new();
+        builder.fetch_options(fetch_options);
+        let repo = builder.clone(url, Path::new(path))
             .context(format!("Failed to clone repository from {}", url))?;
         Ok(Self { repo })
     }
@@ -213,19 +222,19 @@ impl GitRepository {
     }
 
     /// Get commit history
-    pub fn get_commits(&self, max_count: usize) -> Result<Vec<CommitInfo>> {
+    pub fn get_commits(&self, max_count: usize, offset: usize, reference: Option<&str>) -> Result<Vec<CommitInfo>> {
         let mut revwalk = self.repo.revwalk()?;
 
-        if revwalk.push_head().is_err() {
+        if let Some(reference) = reference {
+            let object = self.repo.revparse_single(reference)
+                .context(format!("Failed to resolve branch or reference: {}", reference))?;
+            revwalk.push(object.id())?;
+        } else if revwalk.push_head().is_err() {
             return Ok(Vec::new());
         }
 
         let mut commits = Vec::new();
-        for (i, oid) in revwalk.enumerate() {
-            if i >= max_count {
-                break;
-            }
-
+        for oid in revwalk.skip(offset).take(max_count) {
             let oid = oid?;
             let commit = self.repo.find_commit(oid)?;
 

@@ -16,9 +16,9 @@ pub fn open_repository(path: String) -> ApiResponse<String> {
 
 /// Clone a repository from URL (异步执行，不阻塞主线程)
 #[tauri::command]
-pub async fn clone_repository(url: String, path: String) -> ApiResponse<String> {
+pub async fn clone_repository(url: String, path: String, proxy_url: Option<String>) -> ApiResponse<String> {
     let handle = tokio::task::spawn(async move {
-        match GitRepository::clone(&url, &path) {
+        match GitRepository::clone(&url, &path, proxy_url.as_deref()) {
             Ok(_) => ApiResponse::success("Repository cloned successfully".to_string()),
             Err(e) => ApiResponse::error(e.to_string()),
         }

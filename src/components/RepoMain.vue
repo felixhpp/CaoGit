@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import type { Repository } from '../types';
 import ChangesView from './views/ChangesView.vue';
 import HistoryView from './views/HistoryView.vue';
@@ -16,9 +16,7 @@ defineProps<{
 
 const leftPanelWidth = ref(320);
 const rightPanelTopHeight = ref(60); // 百分比
-let refreshInterval: number | null = null;
-let isUserOperating = ref(false);
-let lastOperationTime = 0;
+const branchNames = computed(() => repoStore.branches.map(branch => branch.name));
 
 const historyFilterOptions = ref<FilterOptions>({
   searchText: '',
@@ -32,62 +30,7 @@ onMounted(() => {
   // 从设置中恢复面板宽度和高度
   leftPanelWidth.value = settingsStore.settings.layout.leftPanelWidth ?? 320;
   rightPanelTopHeight.value = settingsStore.settings.layout.rightPanelTopHeight ?? 60;
-
-  // 启动文件变更自动监控
-  startAutoRefresh();
 });
-
-onUnmounted(() => {
-  stopAutoRefresh();
-});
-
-// 监听活跃仓库变化，重启自动刷新
-watch(() => repoStore.activeRepo, (newRepo) => {
-  stopAutoRefresh();
-  if (newRepo) {
-    startAutoRefresh();
-  }
-});
-
-function startAutoRefresh() {
-  if (repoStore.activeRepo) {
-    // 每5秒自动刷新一次文件状态 (增加间隔减少冲突)
-    refreshInterval = window.setInterval(() => {
-      if (repoStore.activeRepo && !isUserOperating.value) {
-        // Only refresh if user hasn't operated recently (within last 2 seconds)
-        const timeSinceLastOp = Date.now() - lastOperationTime;
-        if (timeSinceLastOp > 2000) {
-          repoStore.refreshStatus().catch(error => {
-            console.error('Auto-refresh failed:', error);
-          });
-        }
-      }
-    }, 5000); // Increased from 3s to 5s
-  }
-}
-
-// Track user operations to prevent refresh conflicts
-// This function should be called when user performs operations like stage/unstage
-// For now, we'll export it for future use
-const markUserOperation = () => {
-  lastOperationTime = Date.now();
-  isUserOperating.value = true;
-
-  // Reset after 2 seconds
-  setTimeout(() => {
-    isUserOperating.value = false;
-  }, 2000);
-};
-
-// Export for potential use by child components
-defineExpose({ markUserOperation });
-
-function stopAutoRefresh() {
-  if (refreshInterval !== null) {
-    clearInterval(refreshInterval);
-    refreshInterval = null;
-  }
-}
 
 function handleLeftPanelResize(delta: number) {
   // 最小宽度设置为网络状态框的宽度 (240px)
@@ -107,8 +50,12 @@ function handleTopPaneResize(delta: number) {
   settingsStore.updateLayoutSettings({ rightPanelTopHeight: newTopHeight });
 }
 
-function handleHistoryFilter(options: FilterOptions) {
+async function handleHistoryFilter(options: FilterOptions) {
+  const branchChanged = historyFilterOptions.value.branch !== options.branch;
   historyFilterOptions.value = options;
+  if (branchChanged) {
+    await repoStore.refreshCommits(100, 0, options.branch || undefined);
+  }
 }
 </script>
 
@@ -136,7 +83,7 @@ function handleHistoryFilter(options: FilterOptions) {
           <div class="pane-header-title">提交历史</div>
           <div class="pane-header-actions">
             <CommitFilter
-              :branches="[]"
+              :branches="branchNames"
               @filter="handleHistoryFilter"
             />
           </div>

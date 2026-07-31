@@ -113,7 +113,7 @@ async function loadMoreCommits() {
   try {
     isLoadingMore.value = true;
     const currentCount = repoStore.commits.length;
-    await repoStore.refreshCommits(100, currentCount);
+    await repoStore.refreshCommits(100, currentCount, props.filterOptions.branch || undefined);
   } catch (error) {
     console.error('Failed to load more commits:', error);
   } finally {

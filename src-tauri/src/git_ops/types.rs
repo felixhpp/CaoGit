@@ -123,6 +123,8 @@ pub struct AuthConfig {
     pub token: Option<String>,
     pub username: Option<String>,
     pub password: Option<String>,
+    #[serde(rename = "sshKeyPath")]
+    pub ssh_key_path: Option<String>,
 }
 
 /// Sync status between local and remote branches

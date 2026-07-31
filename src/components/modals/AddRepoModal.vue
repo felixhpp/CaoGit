@@ -5,6 +5,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { debugStore } from '../../stores/debugStore';
 import { toastStore } from '../../stores/toastStore';
 import { repoStore } from '../../stores/repoStore';
+import { settingsStore } from '../../stores/settingsStore';
 import type { Repository } from '../../types';
 import InitRepoModal from './InitRepoModal.vue';
 
@@ -101,40 +102,7 @@ async function addLocalRepo() {
 
     if (response.success) {
       const pathToAdd = localPath.value;
-
-      // Extract repository name from path
-      const repoName = pathToAdd.split('/').filter(Boolean).pop() || 'Unknown';
-
-      // Generate new ID
-      const newId = repoStore.repositories.length > 0
-        ? Math.max(...repoStore.repositories.map(r => r.id)) + 1
-        : 1;
-
-      // Try to get remote URL
-      let remoteUrl = '';
-      try {
-        const remotesResponse = await GitApi.getRemotes(pathToAdd);
-        if (remotesResponse.success && remotesResponse.data && remotesResponse.data.length > 0) {
-          const origin = remotesResponse.data.find(r => r.name === 'origin');
-          remoteUrl = origin ? origin.url : remotesResponse.data[0].url;
-        }
-      } catch (error) {
-        // No remote found
-      }
-
-      // Create new repository object
-      const newRepo: Repository = {
-        id: newId,
-        name: repoName,
-        path: pathToAdd,
-        status: 'online',
-        protocol: 'https',
-        authType: 'none',
-        remoteUrl: remoteUrl || undefined
-      };
-
-      // Add to store
-      repoStore.addRepository(newRepo);
+      await registerRepository(pathToAdd);
 
       // Emit event for parent component (e.g., to select the repo)
       emit('repo-added', pathToAdd);
@@ -163,12 +131,12 @@ async function cloneRemoteRepo() {
     return;
   }
 
-  // TODO: Apply proxy settings
-  // TODO: Use GitApi.cloneRepository with proxy settings
+  const proxyUrl = buildProxyUrl();
 
-  const response = await GitApi.cloneRepository(cloneUrl.value, cloneTargetPath.value);
+  const response = await GitApi.cloneRepository(cloneUrl.value, cloneTargetPath.value, proxyUrl);
 
   if (response.success) {
+    await registerRepository(cloneTargetPath.value);
     emit('repo-added', cloneTargetPath.value);
     emit('close');
   } else {
@@ -176,7 +144,61 @@ async function cloneRemoteRepo() {
   }
 }
 
-function handleInitSuccess(path: string) {
+function buildProxyUrl(): string | undefined {
+  if (proxyMode.value === 'none') return undefined;
+
+  const proxy = proxyMode.value === 'global'
+    ? settingsStore.settings.proxy
+    : {
+        enabled: true,
+        type: customProxyType.value,
+        host: customProxyHost.value,
+        port: customProxyPort.value,
+        username: customProxyUsername.value,
+        password: customProxyPassword.value
+      };
+
+  if (!proxy.enabled || !proxy.host || !proxy.port) return undefined;
+
+  const credentials = proxy.username
+    ? `${encodeURIComponent(proxy.username)}:${encodeURIComponent(proxy.password || '')}@`
+    : '';
+  return `${proxy.type}://${credentials}${proxy.host}:${proxy.port}`;
+}
+
+async function registerRepository(path: string) {
+  const existing = repoStore.repositories.find(repo => repo.path === path);
+  if (existing) return existing;
+
+  let remoteUrl: string | undefined;
+  try {
+    const remotesResponse = await GitApi.getRemotes(path);
+    if (remotesResponse.success && remotesResponse.data?.length) {
+      const origin = remotesResponse.data.find(remote => remote.name === 'origin');
+      remoteUrl = (origin || remotesResponse.data[0]).url;
+    }
+  } catch {
+    // A repository does not need a remote.
+  }
+
+  const repository: Repository = {
+    id: repoStore.repositories.length > 0
+      ? Math.max(...repoStore.repositories.map(repo => repo.id)) + 1
+      : 1,
+    name: path.split(/[\\/]/).filter(Boolean).pop() || 'Unknown',
+    path,
+    status: 'online',
+    protocol: remoteUrl?.startsWith('git@') || remoteUrl?.startsWith('ssh://') ? 'ssh' : 'https',
+    authType: 'none',
+    remoteUrl
+  };
+
+  repoStore.addRepository(repository);
+  return repository;
+}
+
+async function handleInitSuccess(path: string) {
+  await registerRepository(path);
   emit('repo-added', path);
   emit('close');
   localPath.value = '';

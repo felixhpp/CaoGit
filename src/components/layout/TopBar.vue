@@ -26,6 +26,20 @@ const showPublishModal = ref(false);
 const showReleaseManager = ref(false);
 const hasRemote = ref(false);
 const isGitHubRepo = ref(false);
+const releaseManagerEnabled = computed(() => settingsStore.settings.advanced.experimentalFeatures);
+
+function getActiveAuthConfig() {
+  const repo = repoStore.activeRepo;
+  if (!repo || repo.authType === 'none') return undefined;
+
+  return {
+    authType: repo.authType,
+    token: repo.token,
+    username: repo.username,
+    password: repo.password,
+    sshKeyPath: repo.sshKeyPath
+  };
+}
 
 // Compute sync status display
 const syncStatusDisplay = computed(() => {
@@ -162,7 +176,8 @@ async function executePull() {
     const response = await GitApi.pull(
       repoStore.activeRepo.path,
       'origin',
-      currentBranch.value
+      currentBranch.value,
+      getActiveAuthConfig()
     );
 
     if (response.success) {
@@ -223,19 +238,11 @@ async function executePush() {
   try {
     if (!repoStore.activeRepo) return; // Safety check
 
-    // 获取当前仓库的认证配置
-    const authConfig = repoStore.activeRepo ? {
-      authType: repoStore.activeRepo.authType || 'none',
-      token: repoStore.activeRepo.token,
-      username: repoStore.activeRepo.username,
-      password: repoStore.activeRepo.password
-    } : undefined;
-
     const response = await GitApi.push(
       repoStore.activeRepo.path,
       'origin',
       currentBranch.value,
-      authConfig
+      getActiveAuthConfig()
     );
 
     if (response.success) {
@@ -273,15 +280,7 @@ async function handleFetch() {
   await new Promise(resolve => setTimeout(resolve, 50));
 
   try {
-    // 获取当前仓库的认证配置
-    const authConfig = repoStore.activeRepo ? {
-      authType: repoStore.activeRepo.authType || 'none',
-      token: repoStore.activeRepo.token,
-      username: repoStore.activeRepo.username,
-      password: repoStore.activeRepo.password
-    } : undefined;
-
-    const response = await GitApi.fetch(repoStore.activeRepo.path, 'origin', authConfig);
+    const response = await GitApi.fetch(repoStore.activeRepo.path, 'origin', getActiveAuthConfig());
 
     if (response.success) {
       progressMessage.value = 'Fetch 成功!';
@@ -467,10 +466,10 @@ async function createNewBranch() {
           <span>发布</span>
         </button>
 
-        <div class="separator"></div>
+        <div v-if="releaseManagerEnabled" class="separator"></div>
 
         <button
-          v-if="hasRemote && isGitHubRepo"
+          v-if="releaseManagerEnabled && hasRemote && isGitHubRepo"
           class="action-btn release-btn"
           title="发布管理 - 一键构建多平台版本"
           @click="openReleaseManager"
@@ -495,7 +494,7 @@ async function createNewBranch() {
 
     <!-- Release Manager Modal -->
     <ReleaseManagerModal
-      v-if="repoStore.activeRepo"
+      v-if="releaseManagerEnabled && repoStore.activeRepo"
       :show="showReleaseManager"
       :repo-path="repoStore.activeRepo.path"
       :github-token="settingsStore.settings.githubToken || null"
@@ -522,284 +521,4 @@ async function createNewBranch() {
   </header>
 </template>
 
-<style scoped>
-.top-bar {
-  height: 56px;
-  background-color: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--border-color);
-  display: flex;
-  justify-content: flex-start;
-  align-items: center;
-  padding: 0 var(--spacing-lg);
-  position: relative;
-  flex-shrink: 0;
-  min-width: 0;
-  overflow: visible;
-  z-index: 100;
-}
-
-:root[data-theme="dark"] .top-bar {
-  background-color: rgba(15, 23, 42, 0.8);
-}
-
-/* Draggable region covering the entire top bar */
-.drag-region {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 0;
-  /* This makes the entire top bar draggable */
-}
-
-/* Ensure all interactive elements are above the drag region */
-.branch-info,
-.actions {
-  position: relative;
-  z-index: 1;
-  flex-shrink: 1;
-  min-width: 0;
-}
-
-.branch-info {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-  flex-shrink: 1;
-  min-width: 0;
-}
-
-
-.label {
-  color: var(--text-tertiary);
-}
-
-.branch-selector {
-  position: relative;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.branch-name {
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-primary);
-  background-color: var(--bg-secondary);
-  padding: 4px 12px;
-  border-radius: var(--radius-full);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--border-color);
-  transition: all var(--transition-fast);
-}
-
-.branch-name:hover {
-  border-color: var(--accent-color);
-  background-color: var(--bg-hover);
-  box-shadow: 0 0 0 2px var(--accent-subtle);
-}
-
-.branch-name::before {
-  content: '';
-  display: block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background-color: var(--accent-color);
-}
-
-.branch-menu {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 8px;
-  background-color: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-  min-width: 250px;
-  z-index: 10000;
-}
-
-.menu-header {
-  padding: var(--spacing-sm) var(--spacing-md);
-  border-bottom: 1px solid var(--border-color);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.create-branch-btn {
-  padding: 4px 8px;
-  font-size: var(--font-size-xs);
-  border-radius: var(--radius-sm);
-  background-color: var(--accent-color);
-  color: white;
-}
-
-.menu-list {
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.branch-item {
-  padding: var(--spacing-sm) var(--spacing-md);
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  cursor: pointer;
-  transition: background-color var(--transition-fast);
-}
-
-.branch-item:hover {
-  background-color: var(--bg-hover);
-}
-
-.branch-item.active {
-  background-color: rgba(59, 130, 246, 0.1);
-  color: var(--accent-color);
-  font-weight: 600;
-}
-
-.branch-icon {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  color: var(--text-secondary);
-}
-
-.branch-item.active .branch-icon {
-  color: var(--accent-color);
-}
-
-/* Sync Status Styles */
-.sync-status {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border-radius: var(--radius-full);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  margin-left: var(--spacing-sm);
-  border: 1px solid var(--border-color);
-}
-
-.sync-status.synced {
-  background-color: rgba(34, 197, 94, 0.1);
-  color: rgb(22, 163, 74);
-  border-color: rgba(34, 197, 94, 0.3);
-}
-
-.sync-status.ahead {
-  background-color: rgba(59, 130, 246, 0.1);
-  color: rgb(37, 99, 235);
-  border-color: rgba(59, 130, 246, 0.3);
-}
-
-.sync-status.behind {
-  background-color: rgba(251, 146, 60, 0.1);
-  color: rgb(234, 88, 12);
-  border-color: rgba(251, 146, 60, 0.3);
-}
-
-.sync-status.diverged {
-  background-color: rgba(244, 63, 94, 0.1);
-  color: rgb(225, 29, 72);
-  border-color: rgba(244, 63, 94, 0.3);
-}
-
-.sync-icon {
-  font-size: 14px;
-  line-height: 1;
-}
-
-.sync-text {
-  font-size: var(--font-size-xs);
-}
-
-.actions {
-  display: flex;
-  gap: var(--spacing-sm);
-  align-items: center;
-  flex-wrap: wrap;
-  margin-left: auto;
-}
-
-.separator {
-  width: 1px;
-  height: 24px;
-  background-color: var(--border-color);
-  margin: 0 4px;
-}
-
-.action-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-color);
-  background-color: var(--bg-primary);
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  transition: all var(--transition-fast);
-  box-shadow: var(--shadow-sm);
-}
-
-.action-btn:hover:not(:disabled) {
-  background-color: var(--bg-hover);
-  border-color: var(--text-tertiary);
-  color: var(--text-primary);
-  transform: translateY(-1px);
-}
-
-.action-btn:active {
-  transform: translateY(0);
-}
-
-.action-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.action-btn.primary {
-  background-color: var(--accent-color);
-  color: white;
-  border-color: var(--accent-color);
-  box-shadow: 0 1px 2px 0 rgba(37, 99, 235, 0.3);
-}
-
-.action-btn.primary:hover:not(:disabled) {
-  background-color: var(--accent-hover);
-  border-color: var(--accent-hover);
-}
-
-.action-btn.release-btn {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border-color: #667eea;
-  box-shadow: 0 2px 4px 0 rgba(102, 126, 234, 0.4);
-}
-
-.action-btn.release-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #5568d3 0%, #653a8b 100%);
-  border-color: #5568d3;
-  transform: translateY(-1px);
-}
-
-.icon {
-  display: flex;
-  align-items: center;
-}
-</style>
+<style scoped src="./TopBar.css"></style>

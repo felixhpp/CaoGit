@@ -183,7 +183,7 @@ const DEFAULT_SETTINGS: GlobalSettings = {
     logRetentionDays: 7
   },
   security: {
-    rememberCredentials: true,
+    rememberCredentials: false,
     encryptPasswords: true,
     sshKeyPath: undefined,
     gpgSigningKey: undefined,
@@ -197,16 +197,56 @@ const DEFAULT_SETTINGS: GlobalSettings = {
   githubToken: undefined
 };
 
+function mergeSettings(saved: Partial<GlobalSettings> = {}): GlobalSettings {
+  return {
+    ...DEFAULT_SETTINGS,
+    ...saved,
+    proxy: { ...DEFAULT_SETTINGS.proxy, ...saved.proxy },
+    networkTest: { ...DEFAULT_SETTINGS.networkTest, ...saved.networkTest },
+    gitPlatforms: {
+      github: { ...DEFAULT_SETTINGS.gitPlatforms.github, ...saved.gitPlatforms?.github },
+      gitlab: { ...DEFAULT_SETTINGS.gitPlatforms.gitlab, ...saved.gitPlatforms?.gitlab },
+      gitee: { ...DEFAULT_SETTINGS.gitPlatforms.gitee, ...saved.gitPlatforms?.gitee }
+    },
+    layout: { ...DEFAULT_SETTINGS.layout, ...saved.layout },
+    appearance: { ...DEFAULT_SETTINGS.appearance, ...saved.appearance },
+    gitBehavior: { ...DEFAULT_SETTINGS.gitBehavior, ...saved.gitBehavior },
+    sync: { ...DEFAULT_SETTINGS.sync, ...saved.sync },
+    editor: { ...DEFAULT_SETTINGS.editor, ...saved.editor },
+    notification: { ...DEFAULT_SETTINGS.notification, ...saved.notification },
+    performance: { ...DEFAULT_SETTINGS.performance, ...saved.performance },
+    security: { ...DEFAULT_SETTINGS.security, ...saved.security },
+    advanced: { ...DEFAULT_SETTINGS.advanced, ...saved.advanced }
+  };
+}
+
+function settingsForPersistence(settings: GlobalSettings): GlobalSettings {
+  if (settings.security.rememberCredentials) {
+    return settings;
+  }
+
+  return {
+    ...settings,
+    proxy: { ...settings.proxy, username: '', password: '' },
+    gitPlatforms: {
+      github: { ...settings.gitPlatforms.github, token: '' },
+      gitlab: { ...settings.gitPlatforms.gitlab, token: '' },
+      gitee: { ...settings.gitPlatforms.gitee, token: '' }
+    },
+    githubToken: undefined
+  };
+}
+
 function loadSettings(): GlobalSettings {
   try {
     const saved = localStorage.getItem('global_settings');
     if (saved) {
-      return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+      return mergeSettings(JSON.parse(saved));
     }
   } catch (error) {
     console.error('Failed to load settings:', error);
   }
-  return DEFAULT_SETTINGS;
+  return mergeSettings();
 }
 
 export const settingsStore = reactive({
@@ -215,7 +255,7 @@ export const settingsStore = reactive({
   saveSettings(newSettings: Partial<GlobalSettings>) {
     this.settings = { ...this.settings, ...newSettings };
     try {
-      localStorage.setItem('global_settings', JSON.stringify(this.settings));
+      localStorage.setItem('global_settings', JSON.stringify(settingsForPersistence(this.settings)));
     } catch (error) {
       console.error('Failed to save settings:', error);
     }
@@ -311,14 +351,17 @@ export const settingsStore = reactive({
 
   // 导出设置
   exportSettings(): string {
-    return JSON.stringify(this.settings, null, 2);
+    return JSON.stringify(settingsForPersistence({
+      ...this.settings,
+      security: { ...this.settings.security, rememberCredentials: false }
+    }), null, 2);
   },
 
   // 导入设置
   importSettings(jsonString: string): boolean {
     try {
       const imported = JSON.parse(jsonString);
-      this.settings = { ...DEFAULT_SETTINGS, ...imported };
+      this.settings = mergeSettings(imported);
       this.saveSettings(this.settings);
       return true;
     } catch (error) {
@@ -329,7 +372,7 @@ export const settingsStore = reactive({
 
   // 重置为默认设置
   resetToDefaults() {
-    this.settings = { ...DEFAULT_SETTINGS };
+    this.settings = mergeSettings();
     this.saveSettings(this.settings);
     setTheme(this.settings.appearance.theme as Theme);
   }

@@ -68,8 +68,18 @@ export class GitApi {
         return await safeInvoke('commit_changes', { repoPath, message });
     }
 
-    static async getCommits(repoPath: string, maxCount: number = 100): Promise<ApiResponse<CommitInfo[]>> {
-        return await safeInvoke('get_commits', { repoPath, maxCount });
+    static async getCommits(
+        repoPath: string,
+        maxCount: number = 100,
+        offset: number = 0,
+        branch?: string
+    ): Promise<ApiResponse<CommitInfo[]>> {
+        return await safeInvoke('get_commits', {
+            repoPath,
+            maxCount,
+            offset,
+            reference: branch || null
+        });
     }
 
     static async getBranches(repoPath: string): Promise<ApiResponse<BranchInfo[]>> {
@@ -242,8 +252,8 @@ export class GitApi {
     }
 
     // Clone operation
-    static async cloneRepository(url: string, path: string): Promise<ApiResponse<string>> {
-        return await safeInvoke('clone_repository', { url, path });
+    static async cloneRepository(url: string, path: string, proxyUrl?: string): Promise<ApiResponse<string>> {
+        return await safeInvoke('clone_repository', { url, path, proxyUrl: proxyUrl || null });
     }
 
     // Init operation
