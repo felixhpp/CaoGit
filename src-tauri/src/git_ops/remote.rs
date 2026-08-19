@@ -73,8 +73,11 @@ impl GitRepository {
         // Clone auth_config for use in the callback
         let auth_config_clone = auth_config.clone();
 
+        // 克隆仓库配置，用于调用系统凭据助手（git credential helper）
+        let git_config = self.repo.config().ok();
+
         // 添加认证回调，支持 SSH 和 HTTPS
-        callbacks.credentials(move |_url, username_from_url, allowed_types| {
+        callbacks.credentials(move |url, username_from_url, allowed_types| {
             // 0. 优先使用用户配置的认证信息
             if let Some(ref auth) = auth_config_clone {
                 // Token 认证
@@ -117,7 +120,13 @@ impl GitRepository {
                 }
                 return Cred::ssh_key_from_agent("git");
             }
-            // 2. 回退到默认凭据（用于 HTTPS）
+
+            // 2. 尝试系统凭据（凭据助手 + macOS 钥匙串）
+            if let Some(cred) = try_system_https_credentials(&git_config, url, username_from_url, allowed_types) {
+                return Ok(cred);
+            }
+
+            // 3. 回退到默认凭据（用于 HTTPS）
             Cred::default()
         });
 
@@ -194,6 +203,9 @@ impl GitRepository {
 
         // Clone auth_config for use in the callback
         let auth_config_clone = auth_config.clone();
+
+        // 克隆仓库配置，用于调用系统凭据助手（git credential helper）
+        let git_config = self.repo.config().ok();
 
         // 添加详细的认证日志和多重回退机制
         callbacks.credentials(move |url, username_from_url, allowed_types| {
@@ -312,7 +324,13 @@ impl GitRepository {
                 }
             }
 
-            // 3. 尝试默认凭据（用于 HTTPS）
+            // 3. 尝试系统凭据（git 凭据助手 + macOS 钥匙串）
+            if let Some(cred) = try_system_https_credentials(&git_config, url, username_from_url, allowed_types) {
+                eprintln!("   ✅ 已获取系统凭据");
+                return Ok(cred);
+            }
+
+            // 5. 尝试默认凭据（用于 HTTPS）
             if allowed_types.is_user_pass_plaintext() {
                 eprintln!("   正在尝试默认凭据（HTTPS）...");
                 match Cred::default() {
@@ -487,4 +505,100 @@ impl GitRepository {
         self.repo.remote_delete(name)?;
         Ok(())
     }
+}
+
+/// 尝试获取系统级 HTTPS 凭据：先走 git 凭据助手（credential.helper），
+/// 再回退到 macOS 钥匙串直读。返回可用凭据则直接使用。
+fn try_system_https_credentials(
+    git_config: &Option<git2::Config>,
+    url: &str,
+    username_from_url: Option<&str>,
+    allowed_types: git2::CredentialType,
+) -> Option<git2::Cred> {
+    if !allowed_types.is_user_pass_plaintext() {
+        return None;
+    }
+
+    // 1. git 凭据助手（需 git 配置可达且 helper 可执行）
+    if let Some(ref config) = git_config {
+        if let Ok(cred) = Cred::credential_helper(config, url, username_from_url) {
+            return Some(cred);
+        }
+    }
+
+    // 2. 设备流登录写入的 GitHub token（generic password，账户 github_token），仅用于 GitHub 主机
+    #[cfg(target_os = "macos")]
+    if url.contains("github.com") {
+        if let Ok(token) = crate::keychain::get_password(crate::keychain::GITHUB_TOKEN_ACCOUNT) {
+            if !token.is_empty() {
+                if let Ok(cred) = Cred::userpass_plaintext("git", &token) {
+                    return Some(cred);
+                }
+            }
+        }
+    }
+
+    // 3. macOS 钥匙串直读（等价于 git credential osxkeychain）
+    #[cfg(target_os = "macos")]
+    if let Some((account, password)) = read_keychain_https_credentials(url) {
+        if let Ok(cred) = Cred::userpass_plaintext(&account, &password) {
+            return Some(cred);
+        }
+    }
+
+    None
+}
+
+/// 从 macOS 系统钥匙串读取 HTTPS 凭据（等价于 git credential osxkeychain helper）。
+/// 返回 (账户名, 密码/Token)。仅限 macOS 使用。
+#[cfg(target_os = "macos")]
+fn read_keychain_https_credentials(url: &str) -> Option<(String, String)> {
+    use std::process::Command;
+
+    // 从远程 URL 提取主机名，如 https://github.com/owner/repo.git -> github.com
+    let host = url
+        .split("://")
+        .nth(1)?
+        .split('@')
+        .last()?
+        .split('/')
+        .next()?
+        .split(':')
+        .next()?
+        .to_string();
+    if host.is_empty() {
+        return None;
+    }
+
+    // 读取账户名（如 "acct"<blob>="felixhpp"）
+    let acct_output = Command::new("security")
+        .args(["find-internet-password", "-s", &host])
+        .output()
+        .ok()?;
+    if !acct_output.status.success() {
+        return None;
+    }
+    let acct_text = String::from_utf8_lossy(&acct_output.stdout);
+    let account = acct_text.lines().find_map(|line| {
+        let line = line.trim();
+        let (_, rest) = line.split_once("\"acct\"")?;
+        let start = rest.find('"')? + 1;
+        let end = rest[start..].find('"')? + start;
+        Some(rest[start..end].to_string())
+    }).unwrap_or_else(|| "git".to_string());
+
+    // 读取密码（Token），-w 仅输出密码本身
+    let pass_output = Command::new("security")
+        .args(["find-internet-password", "-s", &host, "-w"])
+        .output()
+        .ok()?;
+    if !pass_output.status.success() {
+        return None;
+    }
+    let password = String::from_utf8_lossy(&pass_output.stdout).trim().to_string();
+    if password.is_empty() {
+        return None;
+    }
+
+    Some((account, password))
 }

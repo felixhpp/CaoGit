@@ -106,6 +106,7 @@ export interface GlobalSettings {
   security: SecuritySettings;
   advanced: AdvancedSettings;
   githubToken?: string; // GitHub Token for Release Manager
+  githubOAuthClientId?: string; // GitHub OAuth App Client ID（设备流登录）
 }
 
 const DEFAULT_SETTINGS: GlobalSettings = {
@@ -194,7 +195,8 @@ const DEFAULT_SETTINGS: GlobalSettings = {
     experimentalFeatures: false,
     enableDebugLogging: false
   },
-  githubToken: undefined
+  githubToken: undefined,
+  githubOAuthClientId: ''
 };
 
 function mergeSettings(saved: Partial<GlobalSettings> = {}): GlobalSettings {
@@ -289,6 +291,11 @@ export const settingsStore = reactive({
   updateGitHubToken(token: string) {
     this.settings.githubToken = token;
     this.saveSettings({ githubToken: token });
+  },
+
+  updateGitHubOAuthClientId(clientId: string) {
+    this.settings.githubOAuthClientId = clientId;
+    this.saveSettings({ githubOAuthClientId: clientId });
   },
 
   updateAppearance(appearance: Partial<AppearanceSettings>) {

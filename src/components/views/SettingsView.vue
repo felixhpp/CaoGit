@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { settingsStore } from '../../stores/settingsStore';
 import { debugStore } from '../../stores/debugStore';
 import { toastStore } from '../../stores/toastStore';
 import { PlatformApi } from '../../services/platformApi';
 import { repoStore } from '../../stores/repoStore';
+import { openUrl } from '@tauri-apps/plugin-opener';
+import {
+  startDeviceFlow as startDeviceFlowApi,
+  pollDeviceFlow,
+  storeDeviceToken
+} from '../../services/deviceFlowApi';
 
 type SettingsTab =
   | 'appearance'
@@ -111,6 +117,126 @@ async function verifyToken(platform: 'github' | 'gitlab' | 'gitee') {
     verifyingToken.value = null;
   }
 }
+
+// ===== GitHub 设备流登录（与 Trae 一致：设备码 → 浏览器授权 → 自动获取 Token）=====
+const deviceFlow = ref({
+  active: false,
+  userCode: '',
+  verificationUri: '',
+  deviceCode: '',
+  interval: 5,
+  clientId: '',
+  polling: false,
+  message: ''
+});
+
+let deviceFlowTimer: number | null = null;
+
+async function beginDeviceFlow() {
+  const clientId = (localSettings.value.githubOAuthClientId || '').trim();
+  if (!clientId) {
+    toastStore.error('请先填写 GitHub OAuth Client ID（需在 GitHub 开发者设置中注册 OAuth App 获取）');
+    return;
+  }
+  deviceFlow.value.clientId = clientId;
+  deviceFlow.value.message = '正在发起 GitHub 设备流登录...';
+  deviceFlow.value.active = true;
+
+  const resp = await startDeviceFlowApi(clientId);
+  if (!resp.success || !resp.data) {
+    deviceFlow.value.active = false;
+    deviceFlow.value.message = '';
+    toastStore.error('发起设备流失败：' + (resp.error || '未知错误'));
+    return;
+  }
+
+  const start = resp.data;
+  deviceFlow.value.userCode = start.user_code;
+  deviceFlow.value.verificationUri = start.verification_uri;
+  deviceFlow.value.deviceCode = start.device_code;
+  deviceFlow.value.interval = Math.max(start.interval || 5, 5);
+  deviceFlow.value.polling = true;
+
+  // 打开授权页面
+  openUrl(start.verification_uri).catch(() => {
+    toastStore.info('已生成设备码，请手动打开授权页面：' + start.verification_uri);
+  });
+
+  startDeviceFlowPolling();
+}
+
+function startDeviceFlowPolling() {
+  if (deviceFlowTimer) window.clearInterval(deviceFlowTimer);
+  deviceFlowTimer = window.setInterval(async () => {
+    if (!deviceFlow.value.polling) return;
+    const resp = await pollDeviceFlow(deviceFlow.value.clientId, deviceFlow.value.deviceCode);
+    if (!resp.success || !resp.data) {
+      deviceFlow.value.polling = false;
+      deviceFlow.value.message = '轮询出错：' + (resp.error || '');
+      return;
+    }
+    const poll = resp.data;
+
+    if (poll.status === 'success' && poll.token) {
+      deviceFlow.value.polling = false;
+      deviceFlow.value.message = '授权成功！正在保存 token...';
+      const saveResp = await storeDeviceToken(poll.token);
+      if (saveResp.success) {
+        localSettings.value.gitPlatforms.github.token = poll.token;
+        toastStore.success('GitHub 登录成功，token 已存入系统钥匙串');
+        // 用 token 验证并更新用户名
+        const verify = await PlatformApi.verifyGitHubToken(poll.token);
+        if (verify.valid && verify.username) {
+          localSettings.value.gitPlatforms.github.username = verify.username;
+        }
+        deviceFlow.value.active = false;
+        deviceFlow.value.message = '';
+      } else {
+        toastStore.error('保存 token 到钥匙串失败：' + (saveResp.error || ''));
+      }
+      return;
+    }
+
+    if (poll.status === 'error') {
+      deviceFlow.value.polling = false;
+      deviceFlow.value.message = '授权失败：' + (poll.error_description || poll.error || '');
+      toastStore.error(deviceFlow.value.message);
+      return;
+    }
+    // pending：继续等待用户授权
+  }, deviceFlow.value.interval * 1000);
+}
+
+function openDeviceFlowUrl() {
+  if (deviceFlow.value.verificationUri) {
+    openUrl(deviceFlow.value.verificationUri);
+  }
+}
+
+function copyUserCode() {
+  if (deviceFlow.value.userCode) {
+    navigator.clipboard?.writeText(deviceFlow.value.userCode).then(() => {
+      toastStore.success('设备码已复制');
+    }).catch(() => toastStore.info('复制失败，请手动输入'));
+  }
+}
+
+function cancelDeviceFlow() {
+  deviceFlow.value.polling = false;
+  if (deviceFlowTimer) {
+    window.clearInterval(deviceFlowTimer);
+    deviceFlowTimer = null;
+  }
+  deviceFlow.value.active = false;
+  deviceFlow.value.message = '';
+}
+
+onBeforeUnmount(() => {
+  if (deviceFlowTimer) {
+    window.clearInterval(deviceFlowTimer);
+    deviceFlowTimer = null;
+  }
+});
 
 function saveSettings() {
   settingsStore.saveSettings(localSettings.value);
@@ -560,6 +686,55 @@ onMounted(() => {
               <div v-if="localSettings.gitPlatforms.github.username" class="username-badge">
                 <span class="label">用户名:</span>
                 <span class="username">{{ localSettings.gitPlatforms.github.username }}</span>
+              </div>
+
+              <!-- GitHub 设备流登录（与 Trae 一致） -->
+              <div class="form-group" style="margin-top: 14px">
+                <label>GitHub OAuth Client ID（设备流登录）</label>
+                <div class="token-input-group">
+                  <input
+                    v-model="localSettings.githubOAuthClientId"
+                    type="text"
+                    placeholder="Iv1.xxxxxxxx（OAuth App 的 Client ID）"
+                  />
+                  <button
+                    class="btn-verify"
+                    @click="beginDeviceFlow"
+                    :disabled="!localSettings.githubOAuthClientId || deviceFlow.active"
+                  >
+                    {{ deviceFlow.active ? '登录中...' : '设备流登录' }}
+                  </button>
+                </div>
+                <a
+                  href="https://github.com/settings/applications/new"
+                  target="_blank"
+                  class="help-link"
+                >
+                  如何注册 OAuth App 获取 Client ID？
+                </a>
+                <p class="device-flow-hint">
+                  设备流登录与 Trae 一致：生成设备码 → 浏览器授权 → 自动获取 Token 并存入系统钥匙串，之后 push/fetch 无需再配置。
+                </p>
+              </div>
+
+              <!-- 设备流授权面板 -->
+              <div v-if="deviceFlow.active" class="device-flow-panel">
+                <template v-if="deviceFlow.userCode">
+                  <p class="device-flow-title">1. 打开 GitHub 授权页面</p>
+                  <a :href="deviceFlow.verificationUri" class="device-flow-url" @click.prevent="openDeviceFlowUrl">
+                    {{ deviceFlow.verificationUri }}
+                  </a>
+                  <p class="device-flow-title">2. 输入以下设备码</p>
+                  <div class="device-flow-code">
+                    <code>{{ deviceFlow.userCode }}</code>
+                    <button class="btn-copy" @click="copyUserCode">复制</button>
+                  </div>
+                  <p class="device-flow-status">
+                    {{ deviceFlow.message || (deviceFlow.polling ? '等待你完成授权...' : '') }}
+                  </p>
+                  <button class="btn-danger" @click="cancelDeviceFlow">取消</button>
+                </template>
+                <p v-else class="device-flow-status">{{ deviceFlow.message }}</p>
               </div>
             </div>
           </div>

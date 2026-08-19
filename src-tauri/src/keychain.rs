@@ -11,6 +11,9 @@ use security_framework::passwords::{get_generic_password, set_generic_password, 
 /// Service name for Keychain items
 const SERVICE_NAME: &str = "com.caogit.app";
 
+/// Keychain account 名称：GitHub token（设备流登录写入，push/fetch 认证回退读取）
+pub const GITHUB_TOKEN_ACCOUNT: &str = "github_token";
+
 /// Save a password to the macOS Keychain
 ///
 /// # Arguments

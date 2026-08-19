@@ -333,6 +333,78 @@
   font-family: monospace;
 }
 
+/* GitHub 设备流登录 */
+.device-flow-hint {
+  margin-top: var(--spacing-xs);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.device-flow-panel {
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-md);
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.device-flow-title {
+  margin: 0 0 var(--spacing-xs);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.device-flow-url {
+  font-size: var(--font-size-sm);
+  color: var(--accent-color);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.device-flow-url:hover {
+  text-decoration: underline;
+}
+
+.device-flow-code {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin: var(--spacing-sm) 0;
+}
+
+.device-flow-code code {
+  font-family: monospace;
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: var(--accent-color);
+  user-select: all;
+}
+
+.btn-copy {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-copy:hover {
+  color: var(--accent-color);
+  border-color: var(--accent-color);
+}
+
+.device-flow-status {
+  margin: var(--spacing-sm) 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
 /* 按钮 */
 .btn-action {
   display: inline-flex;

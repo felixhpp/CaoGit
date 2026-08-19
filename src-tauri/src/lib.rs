@@ -1,6 +1,7 @@
 mod git_ops;
 mod commands;
 mod github_api;
+mod github_device_flow;
 mod release_commands;
 mod keychain;
 
@@ -116,6 +117,10 @@ pub fn run() {
             keychain_delete,
             keychain_exists,
             keychain_migrate,
+            // GitHub 设备流登录
+            github_device_login_start,
+            github_device_login_poll,
+            github_store_device_token,
             // 条件编译：自动更新功能（仅 DMG 版本）
             #[cfg(feature = "auto-update")]
             install_update,

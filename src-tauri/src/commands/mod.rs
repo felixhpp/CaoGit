@@ -14,6 +14,7 @@ mod merge;
 mod utils;
 mod ai;
 mod keychain;
+mod device_flow;
 
 // Re-export all commands
 pub use repository::*;
@@ -27,3 +28,4 @@ pub use merge::*;
 pub use utils::*;
 pub use ai::*;
 pub use keychain::*;
+pub use device_flow::*;
